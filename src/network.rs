@@ -4,7 +4,9 @@ use log::{error, info};
 use bincode;
 use serde::{Serialize, Deserialize};
 use get_if_addrs::{get_if_addrs, IfAddr};
-use std::{error::Error, net::Ipv4Addr};
+use std::{error::Error, net::Ipv4Addr, collections::HashMap};
+
+use crate::state::get_app;
 
 #[derive(Serialize, Deserialize)]
 pub enum UniPacket {
@@ -13,11 +15,12 @@ pub enum UniPacket {
 
 #[derive(Serialize, Deserialize)]
 pub struct InitiationMessage {
-    pub ip_list: Vec<String>
+    pub ip_map: HashMap<String, String>
 }
 
 lazy_static! {
-    pub static ref IP_REGISTER: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    pub static ref IP_REGISTER: Mutex<HashMap<String, String>> 
+        = Mutex::new(HashMap::new());
 }
 
 pub async fn initial_check() -> Result<(), Box<dyn Error>> {
@@ -51,10 +54,8 @@ pub async fn initial_check() -> Result<(), Box<dyn Error>> {
                 let response = &buf[..size];
                 if let Ok(init_msg) = bincode::deserialize::<InitiationMessage>(response) {
                     let mut ip_register = IP_REGISTER.lock().await;
-                    for ip in init_msg.ip_list {
-                        if !ip_register.contains(&ip) {
-                            ip_register.push(ip);
-                        }
+                    for ip in init_msg.ip_map {
+                        ip_register.entry(ip.0).or_insert(ip.1);
                     }
                     found_network = true;
                 }
@@ -137,8 +138,8 @@ pub async fn on_the_lookout() {
 async fn add_ip(ip: String) {
     let mut ip_register = IP_REGISTER.lock().await;
 
-    if !ip_register.contains(&ip.to_string()) {
-        ip_register.push(ip.to_string());
+    if !ip_register.contains_key(&ip.to_string()) {
+        ip_register.entry(ip.clone()).or_insert("player".to_string());
         info!("Added new peer: {}", ip);
     } else {
         info!("Peer already exists: {}", ip);
@@ -176,7 +177,7 @@ pub fn get_broadcast_address() -> Option<String> {
 }
 
 pub async fn create_initiation_message() -> Result<InitiationMessage, Box<dyn Error>> {
-    let ip_list = match get_ip_list().await {
+    let ip_list = match get_ip_map().await {
         Ok(ip_list) => ip_list,
         Err(e) => {
             error!("Error getting ip_list: {}", e);
@@ -186,15 +187,15 @@ pub async fn create_initiation_message() -> Result<InitiationMessage, Box<dyn Er
 
     Ok(
         InitiationMessage{
-            ip_list
+            ip_map: ip_list
         }
     )
 }
 
-pub async fn get_ip_list() -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+pub async fn get_ip_map() -> Result<HashMap<String, String>, Box<dyn Error + Send + Sync>> {
     let ip_register = IP_REGISTER.lock().await;
 
-    let mut ip_list: Vec<String> = ip_register.iter().cloned().collect();
+    let mut ip_map: HashMap<String, String> = ip_register.clone();
 
     let interfaces = get_if_addrs()?;
 
@@ -223,9 +224,14 @@ pub async fn get_ip_list() -> Result<Vec<String>, Box<dyn Error + Send + Sync>> 
     }
 
     if let Some(ref ip) = selected_own_ip {
-        ip_list.push(ip.to_string());
-        info!("Own ip sent: {}", ip);
+        if let Some(app) = get_app() {
+            let locked = app.lock().await;
+            ip_map.entry(ip.to_string()).or_insert(
+                if locked.is_speaker {"speaker".to_string()} else {"player".to_string()}
+            );
+        }
     }
 
-    Ok(ip_list)
+    info!("Retrieved ip map: {:#?}", ip_map);
+    Ok(ip_map)
 }

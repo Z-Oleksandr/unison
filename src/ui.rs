@@ -1,10 +1,11 @@
+use eframe::egui::Grid;
 use eframe::{egui, App};
 use tokio::sync::Mutex;
 use std::sync::Arc;
 use log::{LevelFilter, error, warn, info};
 
 use crate::UnisonApp;
-use crate::network::get_ip_list;
+use crate::network::{get_ip_map, initial_check};
 
 impl App for UnisonApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -27,9 +28,12 @@ impl App for UnisonApp {
                     }
 
                     if ui.button("Rescan Network").clicked() {
-                        let ip_list_clone = Arc::clone(&self.ip_list);
+                        let ip_list_clone = Arc::clone(&self.ip_map);
                         tokio::spawn(async move {
-                            match get_ip_list().await {
+                            if let Err(e) = initial_check().await {
+                                error!("Error during network rescan: {}", e)
+                            };
+                            match get_ip_map().await {
                                 Ok(list) => {
                                     let mut ips = ip_list_clone.lock().await;
                                     *ips = list;
@@ -49,14 +53,30 @@ impl App for UnisonApp {
                     ui.label(format!("Current Mode: {}", if self.is_speaker {"Speaker"} else {"Player"}));
                     ui.label(format!("Streaming: {}", if self.is_streaming { "Yes" } else { "No" }));
                     
-                    let ip_list = self.ip_list.try_lock();
-                    match ip_list {
-                        Ok(list) => {
-                            let peers = list.join(", ");
-                            ui.label(format!("Peers: {}", if peers.is_empty() { "(none)" } else { &peers }))
+                    let ip_map = self.ip_map.try_lock();
+                    match ip_map {
+                        Ok(map) => {
+                            if map.is_empty() {
+                                ui.label("Peers: (none)");
+                            } else {
+                                ui.label("Peers:");
+                                Grid::new("peers_table")
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        ui.heading("IP");
+                                        ui.heading("STATE");
+                                        ui.end_row();
+
+                                        for (ip, state) in map.clone().into_iter() {
+                                            ui.label(ip.to_string());
+                                            ui.label(state.to_string());
+                                            ui.end_row();
+                                        }
+                                    });
+                            }
                         }
                         Err(_) => {
-                            ui.label("Peers: loading...")
+                            ui.label("Peers: loading...");
                         }
                     }
                 })
