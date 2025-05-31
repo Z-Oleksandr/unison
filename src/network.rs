@@ -1,3 +1,4 @@
+use eframe::egui::response;
 use tokio::{net::UdpSocket, sync::Mutex, time::{self, timeout, Duration}};
 use lazy_static::lazy_static;
 use log::{error, info};
@@ -234,4 +235,59 @@ pub async fn get_ip_map() -> Result<HashMap<String, String>, Box<dyn Error + Sen
 
     info!("Retrieved ip map: {:#?}", ip_map);
     Ok(ip_map)
+}
+
+pub async fn rescan_network() -> Result<(), Box<dyn Error>> {
+    let socket = UdpSocket::bind("0.0.0.0:26031")
+        .await
+        .expect("Bind client socket failed");
+    socket.set_broadcast(true).expect("Enable broadcast failed");
+
+    let broadcast_addr = get_broadcast_address().unwrap();
+
+    let packet = match bincode::serialize(&UniPacket::DiscoverySignal) {
+        Ok(pkt) => pkt,
+        Err(e) => {
+            error!("Discovery packet serialization error.");
+            return Err(Box::new(e));
+        }
+    };
+
+    socket.send_to(&packet, broadcast_addr).await?;
+
+    info!("Broadcasting discovery message for rescan...");
+
+    let mut buf = [0; 2048];
+    let mut discovered_ips = HashMap::new();
+    let start_time = time::Instant::now();
+
+    while start_time.elapsed() < Duration::from_secs(2) {
+        match timeout(Duration::from_millis(500), socket.recv_from(&mut buf)).await {
+            Ok(Ok((size, _src))) => {
+                let response = &buf[..size];
+                if let Ok(init_msg) = bincode::deserialize::<InitiationMessage>(response) {
+                    for (ip, state) in init_msg.ip_map {
+                        discovered_ips.insert(ip, state);
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                error!("Error receiving init_msg: {}", e);
+            }
+            Err(_) => {
+                break;
+            }
+        }
+    }
+
+    let mut ip_register = IP_REGISTER.lock().await;
+
+    ip_register.retain(|ip, _| discovered_ips.contains_key(ip));
+
+    for (ip, state) in discovered_ips {
+        ip_register.insert(ip, state);
+    }
+
+    info!("Network rescon complete. Updated IP register: {:?}", *ip_register);
+    Ok(())
 }

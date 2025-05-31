@@ -5,7 +5,7 @@ use std::sync::Arc;
 use log::{LevelFilter, error, warn, info};
 
 use crate::UnisonApp;
-use crate::network::{get_ip_map, initial_check};
+use crate::network::{get_ip_map, initial_check, rescan_network};
 
 impl App for UnisonApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -30,8 +30,8 @@ impl App for UnisonApp {
                     if ui.button("Rescan Network").clicked() {
                         let ip_list_clone = Arc::clone(&self.ip_map);
                         tokio::spawn(async move {
-                            if let Err(e) = initial_check().await {
-                                error!("Error during network rescan: {}", e)
+                            if let Err(e) = rescan_network().await {
+                                error!("Network rescan failed: {}", e);
                             };
                             match get_ip_map().await {
                                 Ok(list) => {
@@ -57,7 +57,17 @@ impl App for UnisonApp {
                     match ip_map {
                         Ok(map) => {
                             if map.is_empty() {
-                                ui.label("Peers: (none)");
+                                ui.label("Peers:");
+                                Grid::new("peers_table")
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        ui.heading("IP");
+                                        ui.heading("STATE");
+                                        ui.end_row();
+
+                                        ui.label("Peers: (none)");
+                                        ui.end_row();
+                                    });
                             } else {
                                 ui.label("Peers:");
                                 Grid::new("peers_table")
