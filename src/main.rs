@@ -14,57 +14,46 @@ use env_logger;
 
 
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
-    use tokio::task::LocalSet;
-
     env_logger::Builder::new()
         .filter(None, LevelFilter::Info)
         .init();
 
     if let Err(e) = add_firewall_rule(26035) {
-        warn!(
-            "Failed to add Firewall rule. Please open port 26030 manually! {}",
-            e
-        );
+        warn!("Failed to add Firewall rule. Please open port 26030 manually! {}", e);
     }
 
-    let local = LocalSet::new();
+    if let Err(e) = initial_check().await {
+        error!("Error on initial check: {}", e);
+    }
 
-    local
-        .run_until(async {
-            if let Err(e) = initial_check().await {
-                error!("Error on initial check: {}", e);
-                return;
-            }
+    // Spawn background tasks (using `tokio::spawn`, not `spawn_local`)
+    tokio::spawn(async {
+        if let Err(e) = listen_for_player().await {
+            error!("listen_for_player error: {}", e);
+        }
+    });
 
-            // Spawn background tasks
-            tokio::task::spawn_local(async {
-                if let Err(e) = listen_for_player().await {
-                    error!("listen_for_player error: {}", e);
-                }
-            });
+    tokio::spawn(async {
+        on_the_lookout().await;
+    });
 
-            tokio::task::spawn(async {
-                on_the_lookout().await;
-            });
+    // Init state (before GUI)
+    state::init_app().await;
 
-            // Init state (if needed before GUI)
-            state::init_app().await;
-
-            let options = eframe::NativeOptions::default();
-            let _ = eframe::run_native(
-                "Unison",
-                options,
-                Box::new(|_cc| {
-                    let app = state::get_app()
-                        .expect("App should be initialized first.")
-                        .clone();
-                    Ok(Box::new(UnisonApp::from_shared(app)))
-                }),
-            );
-        })
-        .await;
+    // GUI blocks the thread, but async tasks run in other threads
+    let options = eframe::NativeOptions::default();
+    let _ = eframe::run_native(
+        "Unison",
+        options,
+        Box::new(|_cc| {
+            let app = state::get_app()
+                .expect("App should be initialized first.")
+                .clone();
+            Ok(Box::new(UnisonApp::from_shared(app)))
+        }),
+    );
 }
 
 #[derive(Default)]
