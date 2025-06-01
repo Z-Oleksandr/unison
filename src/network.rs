@@ -1,7 +1,9 @@
 use eframe::egui::response;
-use tokio::{net::UdpSocket, sync::Mutex, time::{self, timeout, Duration}};
+use tokio::{net::{UdpSocket, TcpStream}, sync::Mutex, time::{self, timeout, Duration}};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+use futures_util::SinkExt;
 use lazy_static::lazy_static;
-use log::{error, info};
+use log::{error, info, warn};
 use bincode;
 use serde::{Serialize, Deserialize};
 use get_if_addrs::{get_if_addrs, IfAddr};
@@ -16,12 +18,18 @@ pub enum UniPacket {
 
 #[derive(Serialize, Deserialize)]
 pub struct InitiationMessage {
-    pub ip_map: HashMap<String, String>
+    pub ip_map: HashMap<String, PeerStatus>
 }
 
 lazy_static! {
-    pub static ref IP_REGISTER: Mutex<HashMap<String, String>> 
+    pub static ref IP_REGISTER: Mutex<HashMap<String, PeerStatus>> 
         = Mutex::new(HashMap::new());
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PeerStatus {
+    Player,
+    Speaker
 }
 
 pub async fn initial_check() -> Result<(), Box<dyn Error>> {
@@ -140,7 +148,7 @@ async fn add_ip(ip: String) {
     let mut ip_register = IP_REGISTER.lock().await;
 
     if !ip_register.contains_key(&ip.to_string()) {
-        ip_register.entry(ip.clone()).or_insert("player".to_string());
+        ip_register.entry(ip.clone()).or_insert(PeerStatus::Player);
         info!("Added new peer: {}", ip);
     } else {
         info!("Peer already exists: {}", ip);
@@ -193,10 +201,10 @@ pub async fn create_initiation_message() -> Result<InitiationMessage, Box<dyn Er
     )
 }
 
-pub async fn get_ip_map() -> Result<HashMap<String, String>, Box<dyn Error + Send + Sync>> {
+pub async fn get_ip_map() -> Result<HashMap<String, PeerStatus>, Box<dyn Error + Send + Sync>> {
     let ip_register = IP_REGISTER.lock().await;
 
-    let mut ip_map: HashMap<String, String> = ip_register.clone();
+    let mut ip_map: HashMap<String, PeerStatus> = ip_register.clone();
 
     let interfaces = get_if_addrs()?;
 
@@ -228,7 +236,7 @@ pub async fn get_ip_map() -> Result<HashMap<String, String>, Box<dyn Error + Sen
         if let Some(app) = get_app() {
             let locked = app.lock().await;
             ip_map.entry(ip.to_string()).or_insert(
-                if locked.is_speaker {"speaker".to_string()} else {"player".to_string()}
+                if locked.is_speaker {PeerStatus::Speaker} else {PeerStatus::Player}
             );
         }
     }

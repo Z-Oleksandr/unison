@@ -6,6 +6,7 @@ use log::{LevelFilter, error, warn, info};
 
 use crate::UnisonApp;
 use crate::network::{get_ip_map, initial_check, rescan_network};
+use crate::bridge::bridge_audio;
 
 impl App for UnisonApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -44,6 +45,14 @@ impl App for UnisonApp {
                             }
                         });
                     }
+
+                    if ui.add_enabled(
+                        !self.is_speaker, 
+                        egui::Button::new("Start Stream")
+                    ).clicked() {
+                        info!("Start Stream clicked");
+                        tokio::spawn(bridge_audio());
+                    }
                 });
 
                 ui.separator();
@@ -79,7 +88,7 @@ impl App for UnisonApp {
 
                                         for (ip, state) in map.clone().into_iter() {
                                             ui.label(ip.to_string());
-                                            ui.label(state.to_string());
+                                            ui.label(format!("{:?}", state));
                                             ui.end_row();
                                         }
                                     });
