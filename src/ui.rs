@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 use log::{LevelFilter, error, warn, info};
 
+use crate::state::get_app;
 use crate::UnisonApp;
 use crate::network::{get_ip_map, initial_check, rescan_network, PeerStatus, IP_REGISTER};
 use crate::bridge::bridge_audio;
@@ -24,7 +25,14 @@ impl App for UnisonApp {
                         self.is_speaker = !self.is_speaker;
 
                         let is_speaker = self.is_speaker;
+                        let app = get_app().ok_or("App state not available").unwrap();
+
+
                         tokio::spawn(async move {
+                            let mut app_lock = app.lock().await;
+
+                            app_lock.is_speaker = is_speaker;
+
                             if let Some(ip) = crate::network::get_own_ip() {
                                 let mut ip_register = IP_REGISTER.lock().await;
                                 ip_register.insert(ip, if is_speaker {
