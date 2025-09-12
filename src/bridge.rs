@@ -35,7 +35,7 @@ pub async fn bridge_audio() -> Result<(), Box<dyn Error + Send + Sync>> {
     let speaker_ip = match speaker_ip {
         Some(ip) => ip,
         None => {
-            warn!("Noe speaker found on the network.");
+            warn!("No speaker found on the network.");
             return Ok(());
         }
     };
@@ -46,6 +46,7 @@ pub async fn bridge_audio() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (mut ws_stream, _) = connect_async(&ws_url).await?;
     info!("Bridge established.");
 
+    // This is some test shenanigans
     tokio::spawn(async move {
         loop {
             let mut file = File::open("../test.wav").unwrap();

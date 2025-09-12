@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use bincode;
 use serde::{Serialize, Deserialize};
 use get_if_addrs::{get_if_addrs, IfAddr};
-use std::{error::Error, net::Ipv4Addr, collections::HashMap};
+use std::{error::Error, net::{Ipv4Addr, IpAddr}, collections::HashMap};
 
 use crate::state::get_app;
 
@@ -183,6 +183,34 @@ pub fn get_broadcast_address() -> Option<String> {
     let result = broadcast_addr.unwrap_or_else(|| "255.255.255.255:26030".to_string());
     info!("Broadcast IP set to {}", result);
     Some(result)
+}
+
+pub fn get_own_ip() -> Option<String> {
+    let interfaces = get_if_addrs().ok()?;
+    let mut selected_own_ip: Option<String> = None;
+
+    for iface in interfaces {
+        if iface.is_loopback() || iface.name.contains("vpn") || iface.name.contains("Virtual") {
+            continue;
+        }
+
+        if let IpAddr::V4(ip_own) = iface.ip() {
+            let octets = ip_own.octets();
+            
+            let is_private = 
+                octets[0] == 10 || 
+                (octets[0] == 192 && octets[1] == 168) ||
+                (octets[0] == 172 && (16..=31).contains(&octets[1]));
+
+            if is_private {
+                if selected_own_ip.is_none() || (octets[0] == 192 && octets[1] == 168) {
+                    selected_own_ip = Some(ip_own.to_string());
+                }
+            }
+        }
+    }
+
+    selected_own_ip
 }
 
 pub async fn create_initiation_message() -> Result<InitiationMessage, Box<dyn Error>> {

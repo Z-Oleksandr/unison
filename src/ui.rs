@@ -5,7 +5,7 @@ use std::sync::Arc;
 use log::{LevelFilter, error, warn, info};
 
 use crate::UnisonApp;
-use crate::network::{get_ip_map, initial_check, rescan_network};
+use crate::network::{get_ip_map, initial_check, rescan_network, PeerStatus, IP_REGISTER};
 use crate::bridge::bridge_audio;
 
 impl App for UnisonApp {
@@ -22,6 +22,18 @@ impl App for UnisonApp {
                 ui.vertical(|ui| {
                     if ui.button(format!("Mode: {}", if self.is_speaker {"Speaker"} else {"Player"})).clicked() {
                         self.is_speaker = !self.is_speaker;
+
+                        let is_speaker = self.is_speaker;
+                        tokio::spawn(async move {
+                            if let Some(ip) = crate::network::get_own_ip() {
+                                let mut ip_register = IP_REGISTER.lock().await;
+                                ip_register.insert(ip, if is_speaker {
+                                    PeerStatus::Speaker
+                                } else {
+                                    PeerStatus::Player
+                                });
+                            }
+                        });
                     }
 
                     if ui.button(if self.is_streaming {"Stop Streaming"} else {"Start Streaming"}).clicked() {
