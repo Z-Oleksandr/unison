@@ -20,8 +20,8 @@ async fn main() {
         .filter(None, LevelFilter::Info)
         .init();
 
-    if let Err(e) = add_firewall_rule(26035) {
-        warn!("Failed to add Firewall rule. Please open port 26030 manually! {}", e);
+    if let Err(e) = add_firewall_rule(26032) {
+        warn!("Failed to add Firewall rule. Please open port 26032 manually! {}", e);
     }
 
     if let Err(e) = initial_check().await {

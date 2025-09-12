@@ -33,7 +33,7 @@ pub enum PeerStatus {
 }
 
 pub async fn initial_check() -> Result<(), Box<dyn Error>> {
-    let socket = UdpSocket::bind("0.0.0.0:26030")
+    let socket = UdpSocket::bind("0.0.0.0:26032")
         .await.expect("Bind client socket failed");
     socket.set_broadcast(true).expect("Enable broadcast failed");
 
@@ -87,7 +87,7 @@ pub async fn initial_check() -> Result<(), Box<dyn Error>> {
 }
 
 pub async fn on_the_lookout() {
-    let socket = match UdpSocket::bind("0.0.0.0:26030")
+    let socket = match UdpSocket::bind("0.0.0.0:26032")
         .await {
             Ok(s) => s,
             Err(e) => {
@@ -96,7 +96,7 @@ pub async fn on_the_lookout() {
             }
         };
 
-    info!("Server broadcast listening on port 26030...");
+    info!("Server broadcast listening on port 26032...");
 
     let mut buf = [0; 65535];
     loop {
@@ -175,12 +175,12 @@ pub fn get_broadcast_address() -> Option<String> {
             let broadcast_ip = Ipv4Addr::from(u32::from(ip) | !u32::from(netmask));
 
             if broadcast_addr.is_none() || iface.name.contains("eth") || iface.name.contains("wlan") {
-                broadcast_addr = Some(format!("{}:26030", broadcast_ip));
+                broadcast_addr = Some(format!("{}:26032", broadcast_ip));
             }
         }
     }
 
-    let result = broadcast_addr.unwrap_or_else(|| "255.255.255.255:26030".to_string());
+    let result = broadcast_addr.unwrap_or_else(|| "255.255.255.255:26032".to_string());
     info!("Broadcast IP set to {}", result);
     Some(result)
 }
@@ -274,7 +274,7 @@ pub async fn get_ip_map() -> Result<HashMap<String, PeerStatus>, Box<dyn Error +
 }
 
 pub async fn rescan_network() -> Result<(), Box<dyn Error>> {
-    let socket = UdpSocket::bind("0.0.0.0:26031")
+    let socket = UdpSocket::bind("0.0.0.0:26032")
         .await
         .expect("Bind client socket failed");
     socket.set_broadcast(true).expect("Enable broadcast failed");
