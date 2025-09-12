@@ -21,6 +21,12 @@ pub struct InitiationMessage {
     pub ip_map: HashMap<String, PeerStatus>
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct UpdateModeMessage {
+    pub own_ip: String,
+    pub new_mode: PeerStatus
+}
+
 lazy_static! {
     pub static ref IP_REGISTER: Mutex<HashMap<String, PeerStatus>> 
         = Mutex::new(HashMap::new());
@@ -141,6 +147,11 @@ pub async fn on_the_lookout() {
                 error!("Received unkown packet from {}", src);
             }
         }
+
+        if let Ok(msg) = bincode::deserialize::<UpdateModeMessage>(received) {
+            let mut ip_register = IP_REGISTER.lock().await;
+            ip_register.insert(msg.own_ip, msg.new_mode);
+        }
     }
 }
 
@@ -227,6 +238,40 @@ pub async fn create_initiation_message() -> Result<InitiationMessage, Box<dyn Er
             ip_map: ip_list
         }
     )
+}
+
+pub async fn report_own_status_changed(
+    new_mode: PeerStatus, 
+    ip_register: HashMap<String, PeerStatus>,
+    own_ip: String
+) {
+    let message = UpdateModeMessage {
+        own_ip: own_ip.clone(),
+        new_mode: new_mode
+    };
+
+    let msg_pkg = match bincode::serialize(&message) {
+        Ok(pkg) => pkg,
+        Err(e) => {
+            error!("Error serializing message: {}", e);
+            return;
+        }
+    };
+
+    let socket = UdpSocket::bind("0.0.0.0:26031")
+        .await
+        .expect("Bind client socket failed for report nm");
+
+    for (ip, _) in ip_register {
+        if ip == own_ip {
+            continue;
+        }
+
+        if let Err(e) = socket.send_to(&msg_pkg, format!("{}:26030", ip)).await {
+            error!("Failed to send to {}: {}", ip, e);
+        }
+    }
+
 }
 
 pub async fn get_ip_map() -> Result<HashMap<String, PeerStatus>, Box<dyn Error + Send + Sync>> {

@@ -88,8 +88,13 @@ pub async fn listen_for_player() -> Result<(), Box<dyn Error + Send + Sync>> {
                         Ok((stream, addr)) => {
                             info!("Incoming connection from {}", addr);
                             let ws_stream = accept_async(stream).await?;
-                            tokio::task::spawn_local(async move {
-                                handle_audio_stream(ws_stream).await;
+                            tokio::spawn(async move {
+                                tokio::task::spawn_blocking(move || {
+                                    tokio::runtime::Handle::current().block_on(
+                                        async move {
+                                            handle_audio_stream(ws_stream).await;
+                                        });
+                                });
                             });
                         }
                         Err(e) => {

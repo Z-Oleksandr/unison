@@ -6,7 +6,7 @@ use log::{LevelFilter, error, warn, info};
 
 use crate::state::get_app;
 use crate::UnisonApp;
-use crate::network::{get_ip_map, initial_check, rescan_network, PeerStatus, IP_REGISTER};
+use crate::network::{get_ip_map, initial_check, report_own_status_changed, rescan_network, PeerStatus, IP_REGISTER};
 use crate::bridge::bridge_audio;
 
 impl App for UnisonApp {
@@ -21,27 +21,34 @@ impl App for UnisonApp {
             ui.horizontal_centered(|ui| {
                 // LEFT SIDE - Buttons
                 ui.vertical(|ui| {
-                    if ui.button(format!("Mode: {}", if self.is_speaker {"Speaker"} else {"Player"})).clicked() {
+                    if ui.button(format!("Mode: {}", if self.is_speaker { "Speaker" } else { "Player" })).clicked() {
                         self.is_speaker = !self.is_speaker;
 
-                        let is_speaker = self.is_speaker;
-                        let app = get_app().ok_or("App state not available").unwrap();
-
-
-                        tokio::spawn(async move {
-                            let mut app_lock = app.lock().await;
-
-                            app_lock.is_speaker = is_speaker;
-
-                            if let Some(ip) = crate::network::get_own_ip() {
-                                let mut ip_register = IP_REGISTER.lock().await;
-                                ip_register.insert(ip, if is_speaker {
-                                    PeerStatus::Speaker
-                                } else {
-                                    PeerStatus::Player
-                                });
-                            }
-                        });
+                        if let Some(app) = get_app() {
+                            let is_speaker = self.is_speaker;
+                            tokio::spawn(async move {
+                                {
+                                    let mut app_lock = app.lock().await;
+                                    app_lock.is_speaker = is_speaker;
+                                }
+                                if let Some(ip) = crate::network::get_own_ip() {
+                                    let mut ip_register = IP_REGISTER.lock().await;
+                                    ip_register.insert(
+                                        ip.clone(),
+                                        if is_speaker { PeerStatus::Speaker } else { PeerStatus::Player }
+                                    );
+                                    report_own_status_changed(
+                                        if is_speaker {PeerStatus::Speaker} else {PeerStatus::Player}, 
+                                        ip_register.clone(), 
+                                        ip
+                                    ).await;
+                                    info!("OwnPeerStatus changed!");
+                                    info!("Updated IP register: {:?}", *ip_register);
+                                }
+                            });
+                        } else {
+                            log::error!("App state not available");
+                        }
                     }
 
                     if ui.button(if self.is_streaming {"Stop Streaming"} else {"Start Streaming"}).clicked() {
