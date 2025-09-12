@@ -66,28 +66,49 @@ pub async fn bridge_audio() -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 pub async fn listen_for_player() -> Result<(), Box<dyn Error + Send + Sync>> {
-    if is_app_player().await {
-        info!("System in player mode.");
-        return Ok(())
+    // Do nothing while player. Perhaps, only spawn funciton at switch to speaker
+    loop {
+        if is_app_player().await {
+            // Stay idle in player mode, check again later
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            continue;
+        }
+
+        info!("System switched to speaker mode, starting listener...");
+        let _ = add_firewall_rule(26032);
+
+        let listener = TcpListener::bind("0.0.0.0:26032").await?;
+        info!("Speaker is listening for audio bridge on port 26032...");
+
+        // Run listener until mode changes back to player
+        loop {
+            tokio::select! {
+                incoming = listener.accept() => {
+                    match incoming {
+                        Ok((stream, addr)) => {
+                            info!("Incoming connection from {}", addr);
+                            let ws_stream = accept_async(stream).await?;
+                            tokio::task::spawn_local(async move {
+                                handle_audio_stream(ws_stream).await;
+                            });
+                        }
+                        Err(e) => {
+                            error!("Error accepting connection: {}", e);
+                            break; // restart outer loop
+                        }
+                    }
+                }
+
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                    // Re-check mode every few seconds
+                    if is_app_player().await {
+                        info!("System switched back to player mode, stopping listener...");
+                        break; // exit inner loop, return to outer loop
+                    }
+                }
+            }
+        }
     }
-
-    let _ = add_firewall_rule(26032);
-
-    let listener = TcpListener::bind("0.0.0.0:26032").await?;
-    info!("Speaker is listening for audio bridge on port 26032...");
-
-    while let Ok((stream, addr)) = listener.accept().await {
-        info!("Incoming connection from {}", addr);
-
-        let ws_stream = accept_async(stream).await?;
-        tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current().block_on(async move {
-                handle_audio_stream(ws_stream).await;
-            });
-        });
-    }
-
-    Ok (())
 }
 
 async fn handle_audio_stream(
