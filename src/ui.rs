@@ -42,8 +42,6 @@ impl App for UnisonApp {
                                         ip_register.clone(), 
                                         ip
                                     ).await;
-                                    info!("OwnPeerStatus changed!");
-                                    info!("Updated IP register: {:?}", *ip_register);
                                 }
                             });
                         } else {

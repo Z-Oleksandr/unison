@@ -15,72 +15,90 @@ use crate::firewall::add_firewall_rule;
 
 pub async fn bridge_audio() -> Result<(), Box<dyn Error + Send + Sync>> {
     
+    loop {
+        match is_app_player().await {
+            Ok(false) => {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+            Ok(true) => {
+                info!("System in player mode.");
+            }
+            Err(e) => {
+                warn!("{}, retrying...", e);
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        }
 
-    if !is_app_player().await {
-        info!("Current system is the speaker - not bridging audio.");
-        return Ok(())
-    }
+        let ip_register = IP_REGISTER.lock().await;
+        let speaker_ip = ip_register
+            .iter()
+            .find_map(|(ip, status)| {
+                if *status == PeerStatus::Speaker {
+                    Some(ip.clone())
+                } else {
+                    None
+                }
+            });
 
-    let ip_register = IP_REGISTER.lock().await;
-    let speaker_ip = ip_register
-        .iter()
-        .find_map(|(ip, status)| {
-            if *status == PeerStatus::Speaker {
-                Some(ip.clone())
-            } else {
-                None
+        let speaker_ip = match speaker_ip {
+            Some(ip) => ip,
+            None => {
+                warn!("No speaker found on the network.");
+                return Ok(());
+            }
+        };
+
+        let ws_url = format!("ws://{}:26032", speaker_ip);
+        info!("Connecting to speaker at Bridge {}", ws_url);
+
+        let (mut ws_stream, _) = connect_async(&ws_url).await?;
+        info!("Bridge established.");
+
+        // This is some test shenanigans
+        tokio::spawn(async move {
+            loop {
+                let mut file = File::open("../test.wav").unwrap();
+                let mut buffer = vec![];
+                file.read_to_end(&mut buffer).unwrap();
+
+                if ws_stream.send(Message::Binary(buffer.into())).await.is_err() {
+                    error!("Failed to send audio chunk. Bridge might be closed.");
+                    break
+                }
+
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
         });
 
-    let speaker_ip = match speaker_ip {
-        Some(ip) => ip,
-        None => {
-            warn!("No speaker found on the network.");
-            return Ok(());
-        }
-    };
-
-    let ws_url = format!("ws://{}:26032", speaker_ip);
-    info!("Connecting to speaker at Bridge {}", ws_url);
-
-    let (mut ws_stream, _) = connect_async(&ws_url).await?;
-    info!("Bridge established.");
-
-    // This is some test shenanigans
-    tokio::spawn(async move {
-        loop {
-            let mut file = File::open("../test.wav").unwrap();
-            let mut buffer = vec![];
-            file.read_to_end(&mut buffer).unwrap();
-
-            if ws_stream.send(Message::Binary(buffer.into())).await.is_err() {
-                error!("Failed to send audio chunk. Bridge might be closed.");
-                break
-            }
-
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    });
-
-    Ok(())
+        return Ok(());
+    }
 }
 
 pub async fn listen_for_player() -> Result<(), Box<dyn Error + Send + Sync>> {
-    // Do nothing while player. Perhaps, only spawn funciton at switch to speaker
     loop {
-        if is_app_player().await {
-            // Stay idle in player mode, check again later
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            continue;
+        // Poll every 5s until speaker
+        match is_app_player().await {
+            Ok(true) => {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
+            Ok(false) => {
+                info!("System switched to speaker mode, starting listener...");
+            }
+            Err(e) => {
+                warn!("{}, retrying...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
         }
 
-        info!("System switched to speaker mode, starting listener...");
         let _ = add_firewall_rule(26032);
-
         let listener = TcpListener::bind("0.0.0.0:26032").await?;
         info!("Speaker is listening for audio bridge on port 26032...");
 
-        // Run listener until mode changes back to player
+        // Run until mode flips back to player
         loop {
             tokio::select! {
                 incoming = listener.accept() => {
@@ -105,8 +123,7 @@ pub async fn listen_for_player() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }
 
                 _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-                    // Re-check mode every few seconds
-                    if is_app_player().await {
+                    if let Ok(true) = is_app_player().await {
                         info!("System switched back to player mode, stopping listener...");
                         break; // exit inner loop, return to outer loop
                     }
@@ -155,17 +172,12 @@ async fn handle_audio_stream(
     info!("Audio bridge closed.");
 }
 
-async fn is_app_player() -> bool {
-    loop {
-        match get_app() {
-            Some(app) => {
-                let app = app.lock().await;
-                return !app.is_speaker;
-            }
-            None => {
-                warn!("App state not available yet, retrying...");
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
+async fn is_app_player() -> Result<bool, &'static str> {
+    match get_app() {
+        Some(app) => {
+            let app = app.lock().await;
+            Ok(!app.is_speaker)
         }
+        None => Err("App state not available"),
     }
 }
