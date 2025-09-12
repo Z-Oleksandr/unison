@@ -156,10 +156,16 @@ async fn handle_audio_stream(
 }
 
 async fn is_app_player() -> bool {
-    let app = get_app().ok_or("App state not available").unwrap();
-    let is_player = {
-        let app = app.lock().await;
-        !app.is_speaker
-    };
-    return is_player;
+    loop {
+        match get_app() {
+            Some(app) => {
+                let app = app.lock().await;
+                return !app.is_speaker;
+            }
+            None => {
+                warn!("App state not available yet, retrying...");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
 }
