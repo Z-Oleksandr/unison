@@ -59,7 +59,7 @@ pub async fn bridge_audio() -> Result<(), Box<dyn Error + Send + Sync>> {
         // This is some test shenanigans
         tokio::spawn(async move {
             loop {
-                let mut file = File::open("../test.wav").unwrap();
+                let mut file = File::open("test.wav").unwrap();
                 let mut buffer = vec![];
                 file.read_to_end(&mut buffer).unwrap();
 
