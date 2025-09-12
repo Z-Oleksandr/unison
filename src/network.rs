@@ -274,7 +274,7 @@ pub async fn get_ip_map() -> Result<HashMap<String, PeerStatus>, Box<dyn Error +
 }
 
 pub async fn rescan_network() -> Result<(), Box<dyn Error>> {
-    let socket = UdpSocket::bind("0.0.0.0:26032")
+    let socket = UdpSocket::bind("0.0.0.0:26033")
         .await
         .expect("Bind client socket failed");
     socket.set_broadcast(true).expect("Enable broadcast failed");
